@@ -126,4 +126,4 @@ PDF / PNG 导出基于 `html2canvas` 和 `jsPDF`：
 
 ## 开源协议
 
-本项目准备开源发布。建议根据你的发布计划补充 `LICENSE` 文件，例如 MIT、Apache-2.0 或其他合适协议。
+本项目基于 [MIT License](./LICENSE) 开源。
