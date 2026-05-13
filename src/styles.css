@@ -691,12 +691,15 @@ button {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+  align-items: flex-start;
+  max-width: 100%;
 }
 
 .skill-chips span,
 .cert-line span {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
   min-height: 28px;
   padding: 4px 10px;
   border-radius: 6px;
@@ -704,9 +707,13 @@ button {
   color: var(--teal-dark);
   font-size: 12px;
   font-weight: 700;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+  text-align: center;
 }
 
 .cert-line span {
+  max-width: 100%;
   background: #f7efe3;
   color: #9a5a19;
 }
@@ -761,7 +768,15 @@ button {
 .layout-editorial .resume-entry,
 .layout-editorial .skill-chips,
 .layout-editorial .cert-line {
+  width: 100%;
+  min-width: 0;
   grid-column: 2;
+  justify-self: start;
+}
+
+.layout-editorial .cert-line span {
+  flex: 0 1 auto;
+  min-width: 0;
 }
 
 .layout-editorial .resume-section--continued-entry {
