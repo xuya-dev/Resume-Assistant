@@ -10,20 +10,95 @@ import { defaultResume, templates } from './data/resume'
 import type { ResumeData, TemplateId } from './types/resume'
 
 const cloneResume = (value: ResumeData): ResumeData => JSON.parse(JSON.stringify(value))
+const STORAGE_KEY = 'resume-assistant:draft:v1'
 
-const resume = reactive<ResumeData>(cloneResume(defaultResume))
-const selectedTemplate = ref<TemplateId>('aqua')
-const activeSection = ref('personal')
+interface SavedDraft {
+  resume: ResumeData
+  selectedTemplate: TemplateId
+  activeSection: string
+  savedAt: string
+}
+
+const isTemplateId = (value: unknown): value is TemplateId =>
+  typeof value === 'string' && templates.some((template) => template.id === value)
+
+const mergeResumeDraft = (value: Partial<ResumeData> | undefined): ResumeData => {
+  const draft = value ?? {}
+
+  return {
+    ...cloneResume(defaultResume),
+    ...draft,
+    personal: {
+      ...defaultResume.personal,
+      ...draft.personal,
+    },
+    education: Array.isArray(draft.education) ? draft.education : cloneResume(defaultResume).education,
+    work: Array.isArray(draft.work) ? draft.work : cloneResume(defaultResume).work,
+    projects: Array.isArray(draft.projects) ? draft.projects : cloneResume(defaultResume).projects,
+    skills: Array.isArray(draft.skills) ? draft.skills : [...defaultResume.skills],
+    certifications: Array.isArray(draft.certifications) ? draft.certifications : [...defaultResume.certifications],
+    settings: {
+      ...defaultResume.settings,
+      ...draft.settings,
+    },
+  }
+}
+
+const loadSavedDraft = (): SavedDraft | null => {
+  try {
+    const rawDraft = window.localStorage.getItem(STORAGE_KEY)
+    if (!rawDraft) return null
+
+    const parsed = JSON.parse(rawDraft) as Partial<SavedDraft>
+    const resumeDraft = mergeResumeDraft(parsed.resume)
+
+    return {
+      resume: resumeDraft,
+      selectedTemplate: isTemplateId(parsed.selectedTemplate) ? parsed.selectedTemplate : 'aqua',
+      activeSection: typeof parsed.activeSection === 'string' ? parsed.activeSection : 'personal',
+      savedAt: typeof parsed.savedAt === 'string' ? parsed.savedAt : new Date().toISOString(),
+    }
+  } catch (error) {
+    console.warn('Failed to load local resume draft:', error)
+    return null
+  }
+}
+
+const savedDraft = loadSavedDraft()
+const initialResume = savedDraft?.resume ?? cloneResume(defaultResume)
+
+const resume = reactive<ResumeData>(initialResume)
+const selectedTemplate = ref<TemplateId>(savedDraft?.selectedTemplate ?? 'aqua')
+const activeSection = ref(savedDraft?.activeSection ?? 'personal')
 const previewRef = ref<InstanceType<typeof ResumePreview> | null>(null)
 const exporting = ref(false)
 
-const historyStack = ref<ResumeData[]>([cloneResume(defaultResume)])
+const historyStack = ref<ResumeData[]>([cloneResume(initialResume)])
 const historyIndex = ref(0)
 let historyTimer: number | undefined
+let storageTimer: number | undefined
 let restoring = false
 
 const canUndo = computed(() => historyIndex.value > 0)
 const canRedo = computed(() => historyIndex.value < historyStack.value.length - 1)
+
+const saveDraft = () => {
+  window.clearTimeout(storageTimer)
+  storageTimer = window.setTimeout(() => {
+    try {
+      const draft: SavedDraft = {
+        resume: cloneResume(toRaw(resume)),
+        selectedTemplate: selectedTemplate.value,
+        activeSection: activeSection.value,
+        savedAt: new Date().toISOString(),
+      }
+
+      window.localStorage.setItem(STORAGE_KEY, JSON.stringify(draft))
+    } catch (error) {
+      console.warn('Failed to save local resume draft:', error)
+    }
+  }, 300)
+}
 
 watch(
   resume,
@@ -70,6 +145,14 @@ const resetResume = () => {
   historyStack.value = [cloneResume(defaultResume)]
   historyIndex.value = 0
 }
+
+watch(
+  [resume, selectedTemplate, activeSection],
+  () => {
+    saveDraft()
+  },
+  { deep: true },
+)
 
 const getPageElements = () => previewRef.value?.getPageElements() ?? []
 
