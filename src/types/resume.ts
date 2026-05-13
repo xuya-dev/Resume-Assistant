@@ -1,4 +1,14 @@
-export type TemplateId = 'aqua' | 'midnight' | 'minimal' | 'aurora' | 'graphite' | 'jade' | 'cobalt'
+export type TemplateId =
+  | 'aqua'
+  | 'midnight'
+  | 'minimal'
+  | 'aurora'
+  | 'graphite'
+  | 'jade'
+  | 'cobalt'
+  | 'rose'
+  | 'lilac'
+  | 'pearl'
 
 export interface PersonalInfo {
   name: string

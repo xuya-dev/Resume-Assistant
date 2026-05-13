@@ -9,6 +9,9 @@ export const templates: ResumeTemplate[] = [
   { id: 'graphite', name: '石墨商务', tone: '利落 / 管理' },
   { id: 'jade', name: '竹影青绿', tone: '自然 / 运营' },
   { id: 'cobalt', name: '钴蓝专栏', tone: '理性 / 工程' },
+  { id: 'rose', name: '玫瑰雅白', tone: '优雅 / 品牌' },
+  { id: 'lilac', name: '雾紫清函', tone: '柔和 / 创意' },
+  { id: 'pearl', name: '珍珠侧影', tone: '轻奢 / 行政' },
 ]
 
 export const defaultResume: ResumeData = {
@@ -18,7 +21,7 @@ export const defaultResume: ResumeData = {
     email: 'xuya_dev@qq.com',
     phone: '138 8888 8888',
     location: '杭州市',
-    website: 'github.com/qingyi-dev',
+    website: 'https://github.com/xuya-dev',
     avatar: avatarUrl,
   },
   summary:

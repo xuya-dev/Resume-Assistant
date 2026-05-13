@@ -63,6 +63,9 @@ const templateLayouts: Record<TemplateId, LayoutKind> = {
   graphite: 'executive',
   jade: 'editorial',
   cobalt: 'technical',
+  rose: 'classic',
+  lilac: 'editorial',
+  pearl: 'executive',
 }
 
 const previewStageRef = ref<HTMLElement | null>(null)
@@ -89,7 +92,11 @@ const setPageRef = (element: unknown, index: number) => {
 const layoutKind = computed(() => templateLayouts[props.template])
 const usesSidePanel = computed(() => layoutKind.value === 'executive' || layoutKind.value === 'technical')
 const sidebarTitle = computed(() => (props.template === 'cobalt' ? '工程能力' : '核心资料'))
-const summaryTitle = computed(() => (props.template === 'graphite' ? '履历摘要' : '工程概览'))
+const summaryTitle = computed(() => {
+  if (props.template === 'graphite') return '履历摘要'
+  if (props.template === 'pearl') return '个人优势'
+  return '工程概览'
+})
 const mainLineChars = computed(() => (usesSidePanel.value ? 36 : props.template === 'minimal' ? 52 : 46))
 const sectionIcons = {
   summary: Sparkles,
@@ -253,7 +260,14 @@ defineExpose({
         <article
           :ref="(element) => setPageRef(element, pageIndex)"
           class="resume-page"
-          :class="[`template-${template}`, `layout-${layoutKind}`, { 'is-compact': resume.settings.compact }]"
+          :class="[
+            `template-${template}`,
+            `layout-${layoutKind}`,
+            {
+              'is-compact': resume.settings.compact,
+              'resume-page--side-continuation': usesSidePanel && !shouldShowSidePanel(page),
+            },
+          ]"
           :aria-label="`简历预览第 ${pageIndex + 1} 页`"
         >
           <div class="resume-layout" :class="{ 'resume-layout--side': shouldShowSidePanel(page) }">
