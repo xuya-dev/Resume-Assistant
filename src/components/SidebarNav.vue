@@ -25,10 +25,11 @@ const sections = [
 <template>
   <nav class="side-nav" aria-label="简历编辑导航">
     <button
-      v-for="section in sections"
+      v-for="(section, index) in sections"
       :key="section.id"
       class="side-nav__item"
       :class="{ 'is-active': activeSection === section.id }"
+      :style="{ animationDelay: `${index * 0.03}s` }"
       type="button"
       @click="activeSection = section.id"
     >

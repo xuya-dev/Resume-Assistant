@@ -1,14 +1,16 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import {
   Award,
   BriefcaseBusiness,
+  CircleDollarSign,
+  Clock,
   FolderKanban,
   GraduationCap,
   Mail,
   MapPin,
   Phone,
   Sparkles,
-  SquareArrowOutUpRight,
+  UserCheck,
   Wrench,
 } from 'lucide-vue-next'
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
@@ -71,8 +73,11 @@ const templateLayouts: Record<TemplateId, LayoutKind> = {
 const previewStageRef = ref<HTMLElement | null>(null)
 const pageRefs = ref<HTMLElement[]>([])
 const previewScale = ref(1)
+const isTransitioning = ref(false)
+const displayTemplate = ref<TemplateId>(props.template)
 
 let resizeObserver: ResizeObserver | undefined
+let transitionTimer: number | undefined
 
 const updatePreviewScale = () => {
   const stage = previewStageRef.value
@@ -112,7 +117,6 @@ const contactItems = computed(() =>
     { icon: Phone, text: props.resume.personal.phone },
     { icon: Mail, text: props.resume.personal.email },
     { icon: MapPin, text: props.resume.personal.location },
-    { icon: SquareArrowOutUpRight, text: props.resume.personal.website },
   ].filter((item) => item.text),
 )
 
@@ -128,11 +132,16 @@ const estimateEntryHeight = (entry: ResumeEntry, withHeading: boolean) => {
 }
 
 const estimateBlockHeight = (block: ResumeBlock, withHeading: boolean) => {
-  if (block.type === 'summary') return (withHeading ? 56 : 12) + textLines(block.text, mainLineChars.value) * 24 + 8
-  if (block.type === 'entry') return estimateEntryHeight(block.entry, withHeading)
+  const sectionMargin = props.resume.settings.compact ? 20 : 28
+  const cardPadding = layoutKind.value === 'split' ? 38 : 0
+
+  if (block.type === 'summary') {
+    return sectionMargin + cardPadding + (withHeading ? 56 : 12) + textLines(block.text, mainLineChars.value) * 24 + 8
+  }
+  if (block.type === 'entry') return sectionMargin + cardPadding + estimateEntryHeight(block.entry, withHeading)
 
   const itemsPerRow = block.variant === 'skills' ? (props.template === 'minimal' ? 6 : 5) : 4
-  return (withHeading ? 56 : 12) + Math.ceil(block.items.length / itemsPerRow) * 36 + 8
+  return sectionMargin + cardPadding + (withHeading ? 56 : 12) + Math.ceil(block.items.length / itemsPerRow) * 36 + 8
 }
 
 const contentBlocks = computed<ResumeBlock[]>(() => {
@@ -187,7 +196,8 @@ const pages = computed<ResumePage[]>(() => {
   const pageContentHeight = 1123 - (compact ? 82 : 100)
   const firstPageHeroHeight = usesSidePanel.value ? (compact ? 126 : 152) : compact ? 168 : 190
   const firstPageCapacity = pageContentHeight - firstPageHeroHeight
-  const nextPageCapacity = pageContentHeight
+  const continuedHeadHeight = compact ? 46 : 54
+  const nextPageCapacity = pageContentHeight - continuedHeadHeight
   const nextPages: ResumePage[] = []
   const seenSections = new Set<SectionId>()
 
@@ -230,6 +240,21 @@ const pages = computed<ResumePage[]>(() => {
 const shouldShowSidePanel = (page: ResumePage) => page.showHero && usesSidePanel.value
 const getSectionIcon = (sectionId: SectionId) => sectionIcons[sectionId]
 
+// 模板切换过渡
+watch(
+  () => props.template,
+  (newTemplate, oldTemplate) => {
+    if (newTemplate !== oldTemplate) {
+      isTransitioning.value = true
+      window.clearTimeout(transitionTimer)
+      transitionTimer = window.setTimeout(() => {
+        displayTemplate.value = newTemplate
+        isTransitioning.value = false
+      }, 200)
+    }
+  },
+)
+
 watch(
   pages,
   () => {
@@ -246,6 +271,7 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   resizeObserver?.disconnect()
+  window.clearTimeout(transitionTimer)
 })
 
 defineExpose({
@@ -256,12 +282,17 @@ defineExpose({
 <template>
   <div ref="previewStageRef" class="preview-stage">
     <div class="resume-pages" :style="{ '--preview-scale': previewScale }">
-      <div v-for="(page, pageIndex) in pages" :key="page.id" class="resume-page-frame">
+      <div
+        v-for="(page, pageIndex) in pages"
+        :key="page.id"
+        class="resume-page-frame"
+        :class="{ 'is-transitioning': isTransitioning }"
+      >
         <article
           :ref="(element) => setPageRef(element, pageIndex)"
           class="resume-page"
           :class="[
-            `template-${template}`,
+            `template-${displayTemplate}`,
             `layout-${layoutKind}`,
             {
               'is-compact': resume.settings.compact,
@@ -276,6 +307,20 @@ defineExpose({
                 <img v-if="resume.settings.showAvatar" class="resume-side-avatar" :src="resume.personal.avatar" alt="简历头像" />
                 <p>{{ resume.personal.title }}</p>
                 <h1>{{ resume.personal.name }}</h1>
+                <div v-if="resume.personal.experience || resume.personal.salary || resume.personal.status" class="side-meta">
+                  <span v-if="resume.personal.experience">
+                    <Clock :size="11" />
+                    {{ resume.personal.experience }}
+                  </span>
+                  <span v-if="resume.personal.salary">
+                    <CircleDollarSign :size="11" />
+                    {{ resume.personal.salary }}
+                  </span>
+                  <span v-if="resume.personal.status">
+                    <UserCheck :size="11" />
+                    {{ resume.personal.status }}
+                  </span>
+                </div>
               </div>
 
               <div class="side-section">
@@ -311,6 +356,20 @@ defineExpose({
                     <span v-for="item in contactItems" :key="item.text">
                       <component :is="item.icon" :size="13" />
                       {{ item.text }}
+                    </span>
+                  </div>
+                  <div v-if="!usesSidePanel && (resume.personal.experience || resume.personal.salary || resume.personal.status)" class="hero-meta">
+                    <span v-if="resume.personal.experience">
+                      <Clock :size="12" />
+                      {{ resume.personal.experience }}
+                    </span>
+                    <span v-if="resume.personal.salary">
+                      <CircleDollarSign :size="12" />
+                      {{ resume.personal.salary }}
+                    </span>
+                    <span v-if="resume.personal.status">
+                      <UserCheck :size="12" />
+                      {{ resume.personal.status }}
                     </span>
                   </div>
                 </div>
@@ -372,3 +431,4 @@ defineExpose({
     </div>
   </div>
 </template>
+
