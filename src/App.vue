@@ -1,16 +1,19 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, nextTick, reactive, ref, toRaw, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { FileDown, FileText, ImageDown, RefreshCcw, Redo2, Sparkles, Undo2 } from 'lucide-vue-next'
+import zhCn from 'element-plus/es/locale/lang/zh-cn'
+import { FileDown, FileText, Github, ImageDown, RefreshCcw, Redo2, Sparkles, Undo2 } from 'lucide-vue-next'
 import ResumeEditor from './components/ResumeEditor.vue'
 import ResumePreview from './components/ResumePreview.vue'
 import SidebarNav from './components/SidebarNav.vue'
 import TemplatePicker from './components/TemplatePicker.vue'
 import { defaultResume, templates } from './data/resume'
+import { callAiChat, extractOfficeText, normalizeAiError, optimizeResumeWithAi, parseJsonFromAi, polishTextWithAi, type AiImportResult } from './services/ai'
 import type { ResumeData, TemplateId } from './types/resume'
 
 const cloneResume = (value: ResumeData): ResumeData => JSON.parse(JSON.stringify(value))
 const STORAGE_KEY = 'resume-assistant:draft:v1'
+const elementLocale = zhCn
 
 interface SavedDraft {
   resume: ResumeData
@@ -40,6 +43,10 @@ const mergeResumeDraft = (value: Partial<ResumeData> | undefined): ResumeData =>
     settings: {
       ...defaultResume.settings,
       ...draft.settings,
+    },
+    ai: {
+      ...defaultResume.ai,
+      ...draft.ai,
     },
   }
 }
@@ -72,18 +79,34 @@ const selectedTemplate = ref<TemplateId>(savedDraft?.selectedTemplate ?? 'aqua')
 const activeSection = ref(savedDraft?.activeSection ?? 'personal')
 const previewRef = ref<InstanceType<typeof ResumePreview> | null>(null)
 const exporting = ref(false)
+const saveStatus = ref<'saved' | 'saving' | 'error'>('saved')
+const saveStatusText = ref('已自动保存')
 
 const historyStack = ref<ResumeData[]>([cloneResume(initialResume)])
 const historyIndex = ref(0)
 let historyTimer: number | undefined
 let storageTimer: number | undefined
+let statusTimer: number | undefined
 let restoring = false
 
 const canUndo = computed(() => historyIndex.value > 0)
 const canRedo = computed(() => historyIndex.value < historyStack.value.length - 1)
 
+const updateSaveStatus = (status: 'saved' | 'saving' | 'error', text: string) => {
+  window.clearTimeout(statusTimer)
+  saveStatus.value = status
+  saveStatusText.value = text
+  if (status === 'saved') {
+    statusTimer = window.setTimeout(() => {
+      saveStatusText.value = '已自动保存'
+    }, 2000)
+  }
+}
+
 const saveDraft = () => {
   window.clearTimeout(storageTimer)
+  updateSaveStatus('saving', '保存中...')
+
   storageTimer = window.setTimeout(() => {
     try {
       const draft: SavedDraft = {
@@ -94,8 +117,10 @@ const saveDraft = () => {
       }
 
       window.localStorage.setItem(STORAGE_KEY, JSON.stringify(draft))
+      updateSaveStatus('saved', '已保存')
     } catch (error) {
       console.warn('Failed to save local resume draft:', error)
+      updateSaveStatus('error', '保存失败')
     }
   }, 300)
 }
@@ -237,6 +262,147 @@ const readLabel = (text: string, labels: string[]) => {
 
 const normalize = (value: string) => value.toLowerCase().replace(/[\s./+_-]/g, '')
 
+const makeId = () => {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) return crypto.randomUUID()
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`
+}
+
+const normalizeEntries = (items: unknown): ResumeData['education'] => {
+  if (!Array.isArray(items)) return []
+  return items
+    .filter((item): item is Partial<ResumeData['education'][number]> => typeof item === 'object' && item !== null)
+    .map((item) => ({
+      id: typeof item.id === 'string' ? item.id : makeId(),
+      title: typeof item.title === 'string' ? item.title : '',
+      organization: typeof item.organization === 'string' ? item.organization : '',
+      period: typeof item.period === 'string' ? item.period : '',
+      description: Array.isArray(item.description)
+        ? item.description.map(String).filter(Boolean)
+        : typeof item.description === 'string'
+          ? [item.description]
+          : [],
+    }))
+}
+
+const hasOwn = (target: object, key: string) => Object.prototype.hasOwnProperty.call(target, key)
+
+const mergeAiImportResult = (result: AiImportResult) => {
+  const applied: string[] = []
+
+  if (result.personal && typeof result.personal === 'object') {
+    Object.assign(resume.personal, Object.fromEntries(Object.entries(result.personal).filter(([, value]) => typeof value === 'string')))
+    applied.push('个人信息')
+  }
+  if (typeof result.summary === 'string') {
+    resume.summary = result.summary.trim()
+    applied.push('个人简介')
+  }
+
+  if (hasOwn(result, 'education')) {
+    resume.education = normalizeEntries(result.education)
+    applied.push('教育经历')
+  }
+  if (hasOwn(result, 'work')) {
+    resume.work = normalizeEntries(result.work)
+    applied.push('工作经历')
+  }
+  if (hasOwn(result, 'projects')) {
+    resume.projects = normalizeEntries(result.projects)
+    applied.push('项目经历')
+  }
+  if (Array.isArray(result.skills)) {
+    resume.skills = Array.from(new Set(result.skills.map(String).map((skill) => skill.trim()).filter(Boolean)))
+    applied.push('技能')
+  }
+  if (Array.isArray(result.certifications)) {
+    resume.certifications = Array.from(new Set(result.certifications.map(String).map((cert) => cert.trim()).filter(Boolean)))
+    applied.push('证书奖项')
+  }
+  if (typeof result.recognizerText === 'string') {
+    resume.recognizerText = result.recognizerText.trim()
+  }
+
+  return Array.from(new Set(applied))
+}
+
+const readFileAsDataUrl = (file: File) =>
+  new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(new Error('文件读取失败'))
+    reader.readAsDataURL(file)
+  })
+
+const readFileAsText = async (file: File) => {
+  const officeText = await extractOfficeText(file)
+  if (officeText) return officeText
+  const buffer = await file.arrayBuffer()
+  const bytes = new Uint8Array(buffer)
+  const plain = new TextDecoder('utf-8', { fatal: false }).decode(bytes)
+  return plain.replace(/[\x00-\x08\x0B\x0C\x0E-\x1F]/g, ' ').replace(/\s{2,}/g, ' ').slice(0, 18000)
+}
+
+const importFileWithAi = async (file: File) => {
+  try {
+    ElMessage.info('AI 正在解析文件，请稍候')
+    const isImage = file.type.startsWith('image/')
+    const isPdf = file.type === 'application/pdf' || file.name.toLowerCase().endsWith('.pdf')
+    const content = isImage
+      ? [
+          { type: 'text' as const, text: `请识别这张图片中的简历/资料信息，并转换为结构化 JSON。文件名：${file.name}` },
+          { type: 'image_url' as const, image_url: { url: await readFileAsDataUrl(file) } },
+        ]
+      : isPdf
+        ? [
+            { type: 'text' as const, text: `请直接读取这个 PDF 简历文件，并转换为结构化 JSON。文件名：${file.name}` },
+            { type: 'file' as const, file: { filename: file.name, file_data: await readFileAsDataUrl(file) } },
+          ]
+        : `文件名：${file.name}\n文件类型：${file.type || 'unknown'}\n以下是浏览器端提取的文本内容，可能来自 Word、PPT 或文本文件，请尽力还原简历信息：\n${await readFileAsText(file)}`
+
+    const response = await callAiChat(
+      resume.ai,
+      [
+        {
+          role: 'system',
+          content:
+            '你是简历信息抽取助手。请只返回 JSON，不要 Markdown。JSON 字段：personal{name,title,email,phone,location,experience,salary,status}, summary, education/work/projects 数组，每项包含 title, organization, period, description数组, skills数组, certifications数组, recognizerText。缺失字段用空字符串或空数组。',
+        },
+        { role: 'user', content },
+      ],
+      0.2,
+    )
+    const result = parseJsonFromAi<AiImportResult>(response)
+    const applied = mergeAiImportResult(result)
+    ElMessage.success(applied.length ? `AI 已填充：${applied.join('、')}` : 'AI 已解析，但未发现可填充字段')
+  } catch (error) {
+    ElMessage.error(normalizeAiError(error))
+  }
+}
+
+const polishField = async (value: string, context: string) => {
+  try {
+    const polished = await polishTextWithAi(resume.ai, value, context)
+    ElMessage.success('AI 润色完成')
+    return polished
+  } catch (error) {
+    ElMessage.error(normalizeAiError(error))
+    return value
+  }
+}
+
+
+const optimizeResume = async () => {
+  try {
+    ElMessage.info('AI 正在优化整份简历，请稍候')
+    const response = await optimizeResumeWithAi(resume.ai, cloneResume(toRaw(resume)))
+    const result = parseJsonFromAi<AiImportResult>(response)
+    const applied = mergeAiImportResult(result)
+    ElMessage.success(applied.length ? `AI 已优化：${applied.join('、')}` : 'AI 已返回，但没有可更新内容')
+  } catch (error) {
+    ElMessage.error(normalizeAiError(error))
+  }
+}
+
 const recognizeContent = () => {
   const text = resume.recognizerText.trim()
   if (!text) {
@@ -310,6 +476,7 @@ const recognizeContent = () => {
 </script>
 
 <template>
+  <el-config-provider :locale="elementLocale">
   <div class="app-shell" v-loading="exporting" element-loading-text="正在导出">
     <header class="app-toolbar">
       <div class="brand-lockup">
@@ -321,26 +488,47 @@ const recognizeContent = () => {
       </div>
 
       <div class="toolbar-actions">
+        <!-- 保存状态指示器 -->
+        <div class="save-indicator" :class="{ 'is-saving': saveStatus === 'saving' }">
+          <span class="save-indicator__dot"></span>
+          <span>{{ saveStatusText }}</span>
+        </div>
+
         <el-tooltip content="撤销" placement="bottom">
           <el-button :icon="Undo2" circle :disabled="!canUndo" @click="undo" />
         </el-tooltip>
         <el-tooltip content="重做" placement="bottom">
           <el-button :icon="Redo2" circle :disabled="!canRedo" @click="redo" />
         </el-tooltip>
-        <el-tooltip content="恢复示例" placement="bottom">
-          <el-button :icon="RefreshCcw" circle @click="resetResume" />
-        </el-tooltip>
+        <el-button :icon="RefreshCcw" plain type="warning" @click="resetResume">重置</el-button>
         <el-button :icon="Sparkles" plain @click="activeSection = 'summary'">智能识别</el-button>
         <el-button :icon="ImageDown" plain type="primary" @click="exportResume('png')">PNG</el-button>
         <el-button :icon="FileDown" type="primary" @click="exportResume('pdf')">PDF</el-button>
+        <a href="https://github.com/xuya-dev/Resume-Assistant" target="_blank" rel="noopener noreferrer" class="github-link">
+          <el-tooltip content="GitHub 仓库" placement="bottom">
+            <el-button :icon="Github" circle />
+          </el-tooltip>
+        </a>
       </div>
     </header>
 
     <main class="workspace-grid">
       <SidebarNav v-model:active-section="activeSection" />
-      <ResumeEditor :resume="resume" :active-section="activeSection" @recognize="recognizeContent" />
+      <ResumeEditor
+        :resume="resume"
+        :active-section="activeSection"
+        @recognize="recognizeContent"
+        @import-file="importFileWithAi"
+        @optimize-resume="optimizeResume"
+        :polish-field="polishField"
+      />
       <ResumePreview ref="previewRef" :resume="resume" :template="selectedTemplate" />
       <TemplatePicker v-model="selectedTemplate" :templates="templates" />
     </main>
   </div>
+  </el-config-provider>
 </template>
+
+
+
+

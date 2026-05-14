@@ -21,8 +21,10 @@ export const defaultResume: ResumeData = {
     email: 'xuya_dev@qq.com',
     phone: '138 8888 8888',
     location: '杭州市',
-    website: 'https://github.com/xuya-dev',
     avatar: avatarUrl,
+    experience: '5年',
+    salary: '25K - 35K',
+    status: '在职看机会',
   },
   summary:
     '具备 Java 与 Python 全栈应用从需求分析、接口设计、前端交互、后端服务到部署运维的完整交付经验。熟悉 Spring Boot、Django / FastAPI、Vue 3、MySQL、Redis 与 Docker，关注系统可维护性、接口性能和工程化效率。',
@@ -95,5 +97,10 @@ export const defaultResume: ResumeData = {
   settings: {
     compact: false,
     showAvatar: true,
+  },
+  ai: {
+    baseUrl: 'https://api.openai.com/v1',
+    apiKey: '',
+    model: 'gpt-4o-mini',
   },
 }

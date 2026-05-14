@@ -16,8 +16,10 @@ export interface PersonalInfo {
   email: string
   phone: string
   location: string
-  website: string
   avatar: string
+  experience: string
+  salary: string
+  status: string
 }
 
 export interface ResumeEntry {
@@ -33,6 +35,12 @@ export interface ResumeSettings {
   showAvatar: boolean
 }
 
+export interface AiSettings {
+  baseUrl: string
+  apiKey: string
+  model: string
+}
+
 export interface ResumeData {
   personal: PersonalInfo
   summary: string
@@ -43,6 +51,7 @@ export interface ResumeData {
   certifications: string[]
   recognizerText: string
   settings: ResumeSettings
+  ai: AiSettings
 }
 
 export interface ResumeTemplate {
